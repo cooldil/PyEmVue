@@ -10,12 +10,82 @@ keys.json
 
 ```json
 {
-    "email": "you@email.com",
+    "username": "you@email.com",
     "password": "password"
 }
 ```
 
 ## Usage
+
+### Typical Example - Getting Recent Usage
+This example prints out the device list and energy usage over the last minute.
+```python
+#!/usr/bin/python3
+
+import pyemvue
+from pyemvue.enums import Scale, Unit
+
+def print_recursive(usage_dict, info, depth=0):
+    for gid, device in usage_dict.items():
+        for channelnum, channel in device.channels.items():
+            name = channel.name
+            if name == 'Main':
+                name = info[gid].device_name
+            print('-'*depth, f'{gid} {channelnum} {name} {channel.usage} kwh')
+            if channel.nested_devices:
+                print_recursive(channel.nested_devices, info, depth+1)
+
+vue = pyemvue.PyEmVue()
+vue.login(username='put_username_here', password='put_password_here', token_storage_file='keys.json')
+
+devices = vue.get_devices()
+device_gids = []
+device_info = {}
+for device in devices:
+    if not device.device_gid in device_gids:
+        device_gids.append(device.device_gid)
+        device_info[device.device_gid] = device
+    else:
+        device_info[device.device_gid].channels += device.channels
+
+device_usage_dict = vue.get_device_list_usage(deviceGids=device_gids, instant=None, scale=Scale.MINUTE.value, unit=Unit.KWH.value)
+print('device_gid channel_num name usage unit')
+print_recursive(device_usage_dict, device_info)
+```
+
+This will print out something like:
+```
+device_gid channel_num name usage unit
+ 1234 1,2,3 Home 0.018625023078918456 kwh
+- 2345 1,2,3 Furnace 0.0 kwh
+- 2346 1,2,3 EV 0.0 kwh
+ 1234 1 Oven 0.0 kwh
+ 1234 2 Dryer 0.0 kwh
+ 1234 3 Water Heater 0.0 kwh
+ 1234 4 Kitchen 1 0.0 kwh
+- 3456 1,2,3 Washer 2.0127220576742082e-06 kwh
+ 1234 5 Living Room 0.00031066492724719774 kwh
+- 123456 1,2,3 myplug None kwh
+- 123457 1,2,3 Tree None kwh
+- 123458 1,2,3 Kitchen Counter 5.368702827258442e-05 kwh
+ 1234 6 Bar Area 0.0020457032945421006 kwh
+ 1234 7 Kitchen 2 0.0 kwh
+ 1234 8 Dishwasher 0.0002561144436730279 kwh
+ 1234 9 Bathroom Heater 0.0 kwh
+ 1234 10 Microwave 0.0 kwh
+ 1234 11 AC 0.0 kwh
+ 1234 12 Basement 0.0011743871887920825 kwh
+- 123459 1,2,3 Dehumidifier 0.005342410305036585 kwh
+ 1234 13 Deck 0.0 kwh
+ 1234 14 Front Room 0.0027938466452995143 kwh
+- 123450 1,2,3 Library 0.0001436362373061446 kwh
+ 1234 15 Office 0.004370743334687561 kwh
+- 123451 1,2,3 Network 0.001209796911216301 kwh
+- 123452 1,2,3 Bedroom Fan None kwh
+ 1234 16 Garage 0.0005456661001841227 kwh
+ 1234 Balance Balance 0.00037836666266123273 kwh
+```
+
 
 ### Log in with username/password
 
@@ -33,9 +103,9 @@ with open('keys.json') as f:
     data = json.load(f)
 
 vue = PyEmVue()
-vue.login(id_token=data['idToken'],
-    access_token=data['accessToken'],
-    refresh_token=data['refreshToken'],
+vue.login(id_token=data['id_token'],
+    access_token=data['access_token'],
+    refresh_token=data['refresh_token'],
     token_storage_file='keys.json')
 ```
 
@@ -87,23 +157,9 @@ Updates and returns the passed VueDevice with additional information about the d
 
 ### Get usages for devices
 
-```python
-vue = PyEmVue()
-vue.login(id_token='id_token',
-    access_token='access_token',
-    refresh_token='refresh_token')
+`See Typical Example above.`
 
-devices = vue.get_devices()
-deviceGids = []
-for device in devices:
-    deviceGids.append(device.device_gid)
-
-channel_usage_list = vue.get_devices_usage(deviceGids, None, scale=Scale.DAY.value, unit=Unit.KWH.value)
-for channel in channel_usage_list:
-    print(channel.usage, 'kwh')
-```
-
-Gets the usage for the given devices (specified by device_gid) over the provided time scale. May need to scale it manually to convert it to a rate if desired.
+Gets the usage for the given devices (specified by device_gid) over the provided time scale. May need to scale it manually to convert it to a rate, eg for 1 second data `kilowatt={usage in kwh/s}*3600s/1h` or for 1 minute data `kilowatt={usage in kwh/m}*60m/1h`.
 
 #### Arguments
 
@@ -122,7 +178,7 @@ vue.login(id_token='id_token',
 
 devices = vue.get_devices()
 
-usage_over_time, start_time = vue.get_chart_usage(devices[0].channels[0], datetime.datetime.utcnow()-datetime.timedelta(days=7), datetime.datetime.utcnow(), scale=Scale.DAY.value, unit=Unit.KWH.value)
+usage_over_time, start_time = vue.get_chart_usage(devices[0].channels[0], datetime.datetime.now(datetime.timezone.utc)-datetime.timedelta(days=7), datetime.datetime.now(datetime.timezone.utc), scale=Scale.DAY.value, unit=Unit.KWH.value)
 
 print('Usage for the last seven days starting', start_time.isoformat())
 for usage in usage_over_time:
@@ -149,13 +205,48 @@ vue.login(id_token='id_token',
 
 outlets = vue.get_outlets()
 for outlet in outlets:
-    vue.update_outlet(outlet, not outlet_on)
+    vue.update_outlet(outlet, on=(not outlet.outlet_on))
     # alternatively it can be set on the outlet object first
     outlet.outlet_on = not outlet.outlet_on
     outlet = vue.update_outlet(outlet)
 ```
 
-The `get_outlets` call returns a list of the basic outlet structure but it is also possible to get a full `VueDevice` for the outlet first through the `get_devices` call where the `OutletDevice` will be an object off of the `VueDevice` (ie `device.outlet`). The call to `update_outlet` can either take a full `OutletDevice` with updated values or for simplicity can also take a True/False to turn the outlet on/off without separately modifying the initial outlet object.
+The `get_outlets` call returns a list of outlets directly but it is also possible to get a full `VueDevice` for the outlet first through the `get_devices` call and access an `OutletDevice` through the `outlet` attribute off of the `VueDevice` (ie `device.outlet`).
+
+### Toggle EV Charger (EVSE)
+
+```python
+vue = PyEmVue()
+vue.login(id_token='id_token',
+    access_token='access_token',
+    refresh_token='refresh_token')
+
+chargers = vue.get_chargers()
+for charger in chargers:
+    vue.update_charger(outlet, on=(not charger.charger_on), charge_rate=charger.max_charging_rate)
+    # alternatively you can update the charger object first
+    charger.charger_on = not charger.charger_on
+    charger.charging_rate = 6
+    charger.max_charging_rate = 16
+    charger = vue.update_charger(charger)
+```
+
+The `get_chargers` call returns a list of chargers directly but it is also possible to get a full `VueDevice` for the charger first through the `get_devices` call and access a `ChargerDevice` through the `ev_charger` attribute off of the `VueDevice` (ie `device.ev_charger`).
+
+### Get Vehicles and Status (including battery charge level).
+Note: this call may take an extended amount of time depending on the vehicle, and may "wake" the vehicle to check status - be mindful of call volume, and aware of 10 second timeout that will hit if the vehicle doesn't reply in time (future may want to increase that).
+
+```python
+vehicles = vue.get_vehicles()
+print('List of Vehicles')
+for vehicle in vehicles:
+    print(f'\t{vehicle.vehicle_gid} ({vehicle.display_name}) - {vehicle.year} {vehicle.make} {vehicle.model}')
+
+print('List of Vehicle Statuses')
+for vehicle in vehicles:
+    vehicleStatus = vue.get_vehicle_status(vehicle)
+    print(f'\t{vehicleStatus.vehicle_gid} {vehicleStatus.vehicle_state} - Charging: {vehicleStatus.charging_state} Battery level: {vehicleStatus.battery_level}')
+```
 
 ### Disclaimer
 
